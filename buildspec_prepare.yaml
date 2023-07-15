@@ -1,0 +1,56 @@
+version: 0.2
+
+env:
+  variables:
+    ACCOUNT_ID: ""
+    Chart_Path: ""
+    Bucket: ""
+
+phases:
+  install:
+    commands:
+      - echo Build started on `date`
+      - echo "install kubectl"
+      - curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+      - sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+      - export PATH="$HOME/bin:$PATH"
+      - export PATH="/usr/local/bin/:$PATH"
+      - kubectl version --client
+      - aws eks update-kubeconfig --region ap-south-1 --name dev-cluster --role-arn arn:aws:iam::$ACCOUNT_ID:role/eks-deploy-role
+      - echo "install helm chart"
+      - yum update -y
+      - curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+      - chmod 700 get_helm.sh
+      - ./get_helm.sh
+      - helm version
+      - echo "install helm s3 plugin"
+      - helm plugin install https://github.com/hypnoglow/helm-s3.git
+      - echo "list helm plugins"
+      - helm plugin list
+
+  pre_build:
+    on-failure: CONTINUE
+    commands:
+      - echo "helm lint"
+      - helm lint .
+      - echo "helm add the s3 as chart repository"
+      - helm s3 init s3://$Bucket/stable/dev
+      - helm repo add dev-repo s3://$Bucket/stable/dev/
+      - cd $Chart_Path
+      - echo "helm package"
+      - helm package . >> output
+      - package=$(awk -F ':' '{print $2}' output)
+      - echo "helm push to s3"
+      - helm s3 push $package dev-repo --force
+      - echo "check the chart in s3"
+      - helm repo update
+      - helm search repo dev-repo
+
+  build:
+    commands:
+      - echo "helm install / upgrade"
+      - helm upgrade -i pyapp-release dev-repo/pyapp --version 0.1.0 --namespace dev --dry-run
+
+  post_build:
+    commands:
+      - echo Build completed on `date`
