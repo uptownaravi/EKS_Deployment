@@ -1,0 +1,42 @@
+version: 0.2
+
+env:
+  variables:
+    ACCOUNT_ID: ""
+    Bucket: ""
+
+phases:
+  install:
+    commands:
+      - echo Build started on `date`
+      - echo "install kubectl"
+      - curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+      - sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+      - export PATH="$HOME/bin:$PATH"
+      - kubectl version --client
+      - aws eks update-kubeconfig --region ap-south-1 --name dev-cluster --role-arn arn:aws:iam::$ACCOUNT_ID:role/eks-deploy-role
+      - kubectl get ns
+      - echo "install helm chart"
+      - yum update -y
+      - curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+      - chmod 700 get_helm.sh
+      - ./get_helm.sh
+      - helm version
+
+  pre_build:
+    on-failure: CONTINUE
+    commands:
+      - echo "helm repo add"
+      - helm repo add dev-repo s3://$Bucket/stable/pyapp/
+      - helm repo update
+      - echo "check the chart in s3"
+      - helm search repo dev-repo
+
+  build:
+    commands:
+      - echo "helm install / upgrade"
+      - helm upgrade -i pyapp-release stabl/pyapp --version 0.1.0 --namespace dev
+
+  post_build:
+    commands:
+      - echo Build completed on `date`
